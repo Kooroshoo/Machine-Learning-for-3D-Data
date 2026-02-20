@@ -21,18 +21,52 @@ def step(points, labels, model):
     
     # TODO : Implement step function for classification.
 
-    loss = None
-    preds = None
+    # 1. Move the data to the correct hardware (GPU or CPU)
+    # We grab the global 'device' variable defined in main()
+    global device
+    points = points.to(device)
+    labels = labels.to(device)
+    
+    # 2. Forward pass: Get the model's predictions and transformation matrices
+    logits, trans, feat_trans = model(points)
+    
+    # 3. Calculate the main classification loss (How wrong was the guess?)
+    loss = F.cross_entropy(logits, labels)
+    
+    # 4. Add the Orthogonal Loss penalty (Specific to PointNet)
+    if feat_trans is not None:
+        loss += get_orthogonal_loss(feat_trans)
+        
+    # 5. Get the final predictions (The index of the highest logit score)
+    preds = torch.argmax(logits, dim=1)
+
     return loss, preds
 
 
 def train_step(points, labels, model, optimizer, train_acc_metric):
-    loss, preds = step(points, labels, model)
-    train_batch_acc = train_acc_metric(preds, labels.to(device))
-
+    
     # TODO : Implement backpropagation using optimizer and loss
 
-    return loss, train_batch_acc
+    # 1. Get the loss and predictions from our step function
+    loss, preds = step(points, labels, model)
+    
+    # Calculate accuracy for this specific batch
+    global device
+    train_batch_acc = train_acc_metric(preds, labels.to(device))
+
+    # --- THE LEARNING PHASE (Backpropagation) ---
+    
+    # 2. Clear out the old math/gradients from the previous batch
+    optimizer.zero_grad()
+    
+    # 3. Calculate the new gradients (figure out how to fix the mistakes)
+    loss.backward()
+    
+    # 4. Update the model's weights
+    optimizer.step()
+
+    # We return loss.item() to prevent PyTorch from hoarding memory during training
+    return loss.item(), train_batch_acc
 
 
 def validation_step(points, labels, model, val_acc_metric):

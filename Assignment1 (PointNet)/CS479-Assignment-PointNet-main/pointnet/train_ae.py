@@ -7,7 +7,21 @@ from model import PointNetAutoEncoder
 from dataloaders.modelnet import get_data_loaders
 from utils.metrics import Accuracy
 from utils.model_checkpoint import CheckpointManager
-from pytorch3d.loss.chamfer import chamfer_distance
+#from pytorch3d.loss.chamfer import chamfer_distance        #The "Skip the Headache" Fix (Pure PyTorch) - Since you have an RTX 5090 with a massive amount of VRAM, we can just bypass PyTorch3D entirely and write the Chamfer Distance using standard PyTorch math. It will run perfectly on your GPU without needing any special C++ compilers.
+
+def chamfer_distance(p1, p2):
+    """Pure PyTorch Chamfer Distance."""
+    # Calculate distance between every point
+    dists = torch.cdist(p1, p2, p=2.0) ** 2 
+    
+    # Find shortest distances
+    min_p1_to_p2 = torch.min(dists, dim=2)[0] 
+    min_p2_to_p1 = torch.min(dists, dim=1)[0] 
+    
+    # Average the errors
+    loss = torch.mean(min_p1_to_p2) + torch.mean(min_p2_to_p1)
+    
+    return (loss, None)
 
  
 
@@ -24,8 +38,15 @@ def step(points, model):
     # Hint : Use chamferDist defined in above
     # Hint : You can compute chamfer distance between two point cloud pc1 and pc2 by chamfer_distance(pc1, pc2)
     
-    preds = None
-    loss = None
+    # 1. Move original points to the GPU
+    points = points.to(device)
+    
+    # 2. Forward pass: network tries to rebuild the points from memory
+    preds = model(points) 
+    
+    # 3. Calculate Chamfer Distance (How far off are the reconstructed points?)
+    # chamfer_distance returns (loss, normals_loss). We just grab [0].
+    loss = chamfer_distance(preds, points)[0]
 
     return loss, preds
 
@@ -35,7 +56,16 @@ def train_step(points, model, optimizer):
 
     # TODO : Implement backpropagation using optimizer and loss
 
-    return loss, preds
+    # 1. Get loss and predictions
+    loss, preds = step(points, model)
+
+    # --- Backpropagation ---
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+    # Return loss.item() to save memory!
+    return loss.item(), preds
 
 
 def validation_step(points, model):

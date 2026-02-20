@@ -26,9 +26,23 @@ def step(points, pc_labels, class_labels, model):
     
     # TODO : Implement step function for segmentation.
 
-    loss = None
-    logits = None
-    preds = None
+    # 1. Move data to your RTX 5090
+    points = points.to(device)
+    pc_labels = pc_labels.to(device)
+    
+    # 2. Forward pass: logits shape is [B, 50, N]
+    logits, trans, feat_trans = model(points)
+    
+    # 3. Calculate Loss for every single point
+    loss = F.cross_entropy(logits, pc_labels)
+    
+    # 4. Add the Orthogonal Loss penalty
+    if feat_trans is not None:
+        loss += get_orthogonal_loss(feat_trans)
+        
+    # 5. Predictions: Find the highest scoring part class (0-49) for each point
+    preds = torch.argmax(logits, dim=1)
+
     return loss, logits, preds
 
 
@@ -40,7 +54,12 @@ def train_step(points, pc_labels, class_labels, model, optimizer, train_acc_metr
 
     # TODO : Implement backpropagation using optimizer and loss
 
-    return loss, train_batch_acc
+    # --- Backpropagation ---
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+    return loss.item(), train_batch_acc
 
 
 def validation_step(
